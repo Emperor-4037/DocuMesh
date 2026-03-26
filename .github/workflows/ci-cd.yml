@@ -1,0 +1,106 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/ai-platform
+
+jobs:
+  # ─────────────── Lint & Test ───────────────
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gateway deps
+        run: pip install -r gateway/requirements.txt pytest httpx
+
+      - name: Run linting (ruff)
+        run: |
+          pip install ruff
+          ruff check gateway/ shared/ services/
+
+      - name: Run Gateway Tests
+        run: |
+          PYTHONPATH=. pytest tests/ -v --tb=short
+
+  # ─────────────── Build & Push Images ───────────────
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - name: gateway
+            dockerfile: infra/docker/Dockerfile.gateway
+          - name: paraphrase-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=paraphrase-service
+          - name: grammar-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=grammar-service
+          - name: simplify-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=simplify-service
+          - name: tone-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=tone-service
+          - name: summarize-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=summarize-service
+          - name: rag-service
+            dockerfile: infra/docker/Dockerfile.service
+            build_arg: SERVICE_NAME=rag-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service.name }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.service.dockerfile }}
+          build-args: ${{ matrix.service.build_arg || '' }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}:${{ github.sha }}
+
+  # ─────────────── Container Security Scan ───────────────
+  security-scan:
+    name: Trivy Security Scan
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:latest"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"

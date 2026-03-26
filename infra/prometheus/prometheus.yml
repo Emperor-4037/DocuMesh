@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+    metrics_path: /metrics
+
+  - job_name: 'paraphrase-service'
+    static_configs:
+      - targets: ['paraphrase-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'grammar-service'
+    static_configs:
+      - targets: ['grammar-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'simplify-service'
+    static_configs:
+      - targets: ['simplify-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'tone-service'
+    static_configs:
+      - targets: ['tone-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'summarize-service'
+    static_configs:
+      - targets: ['summarize-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'rag-service'
+    static_configs:
+      - targets: ['rag-service:8000']
+    metrics_path: /metrics

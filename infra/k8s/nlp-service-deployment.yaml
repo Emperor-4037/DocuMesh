@@ -1,0 +1,55 @@
+---
+# Template for a generic NLP microservice deployment
+# Duplicate this file and rename for each: paraphrase, grammar, simplify, tone, summarize
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paraphrase-service
+  labels:
+    app: paraphrase-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paraphrase-service
+  template:
+    metadata:
+      labels:
+        app: paraphrase-service
+    spec:
+      containers:
+        - name: paraphrase-service
+          image: ai-platform/paraphrase-service:latest
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paraphrase-service
+spec:
+  selector:
+    app: paraphrase-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP

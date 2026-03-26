@@ -1,0 +1,92 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-service
+  labels:
+    app: rag-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rag-service
+  template:
+    metadata:
+      labels:
+        app: rag-service
+    spec:
+      containers:
+        - name: rag-service
+          image: ai-platform/rag-service:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: QDRANT_HOST
+              value: "qdrant"
+            - name: REDIS_HOST
+              value: "redis"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-service
+spec:
+  selector:
+    app: rag-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+# Celery Worker Deployment (no HTTP port — pure background consumer)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-worker
+  labels:
+    app: rag-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rag-worker
+  template:
+    metadata:
+      labels:
+        app: rag-worker
+    spec:
+      containers:
+        - name: rag-worker
+          image: ai-platform/rag-service:latest
+          command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "-Q", "rag-queue"]
+          env:
+            - name: QDRANT_HOST
+              value: "qdrant"
+            - name: REDIS_HOST
+              value: "redis"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"

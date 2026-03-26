@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+pydantic-settings
+python-json-logger
+pyjwt
+prometheus-fastapi-instrumentator
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

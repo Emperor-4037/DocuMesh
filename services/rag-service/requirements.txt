@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic-settings
+python-json-logger
+qdrant-client
+sentence-transformers
+celery
+redis
+sqlalchemy
+asyncpg
