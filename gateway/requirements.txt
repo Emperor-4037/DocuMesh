@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 httpx
 pydantic-settings
 python-json-logger
@@ -8,3 +8,7 @@ prometheus-fastapi-instrumentator
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
+sqlalchemy[asyncio]
+asyncpg
+python-multipart
+aiofiles

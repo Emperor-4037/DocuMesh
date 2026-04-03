@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+  # ─── Frontend ───
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: http://localhost:8000
+        VITE_DEMO_TOKEN: demo-token
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+
   # ─── API Gateway ───
   gateway:
     build:
@@ -16,12 +29,22 @@ services:
       - ./gateway/app:/app/app
       - ./shared:/app/shared
     depends_on:
-      - paraphrase-service
-      - grammar-service
-      - simplify-service
-      - tone-service
-      - summarize-service
-      - rag-service
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      paraphrase-service:
+        condition: service_started
+      grammar-service:
+        condition: service_started
+      simplify-service:
+        condition: service_started
+      tone-service:
+        condition: service_started
+      summarize-service:
+        condition: service_started
+      rag-service:
+        condition: service_started
 
   # ─── NLP Services ───
   paraphrase-service:
@@ -79,9 +102,12 @@ services:
       - ./services/rag-service/app:/app/app
       - ./shared:/app/shared
     depends_on:
-      - qdrant
-      - redis
-      - postgres
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   rag-worker:
     build:
@@ -93,14 +119,21 @@ services:
       - ./services/rag-service/app:/app/app
       - ./shared:/app/shared
     depends_on:
-      - redis
-      - qdrant
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
 
   # ─── Data Stores ───
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   postgres:
     image: postgres:15-alpine
@@ -109,9 +142,14 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=aiplatform
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -133,7 +171,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
     depends_on:

@@ -13,27 +13,27 @@ instrument_app(app, "rag-service")
 @app.post("/query", response_model=RAGQueryResponse)
 async def process_query(request: RAGQueryRequest, req: Request):
     trace_id = req.headers.get("X-Trace-Id", "unknown")
-    logger.info("Processing RAG query", extra={"trace_id": trace_id, "query": request.query})
+    logger.info("Processing RAG query", extra={"trace_id": trace_id, "query": request.query[:80]})
 
     with LatencyTracker("rag-service", "/query"):
         answer, passages = rag_query_pipeline(request.query, top_k=request.top_k)
 
-    sources = [ChunkMetadata(source=p["source"], page=None) for p in passages]
+    sources = [
+        ChunkMetadata(source=p["source"], page=p.get("chunk_index"))
+        for p in passages
+    ]
     return RAGQueryResponse(answer=answer, sources=sources)
 
 
 @app.post("/ingest")
 async def ingest_document(req: Request, file: UploadFile = File(...)):
-    """
-    Accept a file upload and push to the async Celery ingestion worker.
-    Returns a task_id for polling status later.
-    """
+    """Accept a file upload and push the raw bytes to the Celery ingestion worker."""
     trace_id = req.headers.get("X-Trace-Id", "unknown")
     logger.info("Queueing document ingestion", extra={"trace_id": trace_id, "filename": file.filename})
 
     content = await file.read()
     metadata = {"filename": file.filename, "content_type": file.content_type}
-    task = ingest_document_task.delay(content.decode("utf-8", errors="ignore"), metadata)
+    task = ingest_document_task.delay(content, metadata)
 
     return {"status": "accepted", "task_id": str(task.id), "filename": file.filename}
 

@@ -1,22 +1,34 @@
 from fastapi import FastAPI, Request
 from shared.schemas import GrammarRequest, GrammarResponse, Correction
 from shared.logging import setup_logging
+from shared.metrics import instrument_app, LatencyTracker
+from .model import correct_grammar
 
 logger = setup_logging("grammar-service")
 app = FastAPI(title="Grammar Service")
+instrument_app(app, "grammar-service")
+
 
 @app.post("/process", response_model=GrammarResponse)
 async def process_grammar(request: GrammarRequest, req: Request):
     trace_id = req.headers.get("X-Trace-Id", "unknown")
     logger.info("Processing grammar request", extra={"trace_id": trace_id, "text_length": len(request.text)})
-    
-    # MVP Placeholder for grammar check model execution
-    corrected = f"[Corrected] {request.text}"
+
+    with LatencyTracker("grammar-service", "/process"):
+        corrected_text, raw_corrections = correct_grammar(request.text)
+
     corrections = [
-        Correction(original="bad", replacement="good", start_index=0, end_index=3, description="Fixed grammar")
+        Correction(
+            original=c["original"],
+            replacement=c["replacement"],
+            start_index=c["start_index"],
+            end_index=c["end_index"],
+            description=c["description"],
+        )
+        for c in raw_corrections
     ]
-    
-    return GrammarResponse(corrected_text=corrected, corrections=corrections)
+    return GrammarResponse(corrected_text=corrected_text, corrections=corrections)
+
 
 @app.get("/health")
 def health():

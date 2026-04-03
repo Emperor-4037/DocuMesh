@@ -1,20 +1,19 @@
 FROM python:3.11-slim
 
+ARG SERVICE_NAME
 WORKDIR /app
 
-# The build context is assumed to be the repository root
-ARG SERVICE_NAME
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies based on the service's requirements
 COPY services/${SERVICE_NAME}/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the specific service code
 COPY services/${SERVICE_NAME}/app ./app
-
-# The shared library will be volume mounted for local dev, 
-# but for prod we would COPY shared ./shared here.
 COPY shared ./shared
+# Mount ./models at runtime for fine-tuned adapters (see docker-compose volumes)
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

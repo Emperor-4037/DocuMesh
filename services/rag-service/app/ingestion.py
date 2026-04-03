@@ -8,6 +8,7 @@ RAG Ingestion pipeline:
 import io
 import re
 import uuid
+import fitz
 from typing import List, Dict, Any
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
@@ -21,10 +22,13 @@ CHUNK_OVERLAP = 80
 
 
 def extract_text(content: bytes, filename: str) -> str:
-    """Supports .txt and .md. Extend with PyMuPDF for PDF."""
+    """Supports .txt, .md, and .pdf via PyMuPDF."""
     if filename.endswith(".pdf"):
-        # Plug in: import fitz; doc = fitz.open(stream=content); return " ".join(p.get_text() for p in doc)
-        return "PDF text extraction placeholder"
+        doc = fitz.open(stream=content, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
     return content.decode("utf-8", errors="ignore")
 
 
