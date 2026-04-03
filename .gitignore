@@ -184,3 +184,7 @@ grafana_data/
 *.onnx
 *.joblib
 models/
+
+# Ignore uncommitted state/secrets
+running.txt
+secrets.yaml
