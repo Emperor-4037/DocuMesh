@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+// Use relative URLs so Vite's dev proxy handles routing to the gateway.
+// In production builds, VITE_API_BASE can be set to an absolute URL.
+const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 // A demo JWT for development — in production the gateway validates real tokens
 const DEMO_TOKEN = import.meta.env.VITE_DEMO_TOKEN ?? 'demo-token';

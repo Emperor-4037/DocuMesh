@@ -1,1 +1,0 @@
-# Simplify service app package

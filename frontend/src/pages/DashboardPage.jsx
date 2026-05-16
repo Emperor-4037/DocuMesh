@@ -1,6 +1,7 @@
 import { Wand2, ShieldCheck, BookOpen, Mic2, AlignLeft, Database, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import PageWrapper from '../components/PageWrapper';
+import HealthDashboard from '../components/HealthDashboard';
 
 const TOOLS = [
   {
@@ -94,6 +95,11 @@ export default function DashboardPage({ setActive }) {
           </motion.div>
         ))}
       </motion.div>
+
+      {/* Service Health Dashboard */}
+      <div className="mt-4">
+        <HealthDashboard />
+      </div>
 
       {/* Divider */}
       <div className="divider" style={{ margin: '32px 0 16px' }} />

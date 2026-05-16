@@ -1,3 +1,4 @@
+import os
 import uuid
 import time
 import httpx
@@ -19,6 +20,14 @@ from shared.schemas import (
     SummarizeRequest, SummarizeResponse,
     RAGQueryRequest, RAGQueryResponse,
 )
+
+# ── Service URL config (env-overridable for local dev) ────────────────────────
+_PARAPHRASE_BASE = os.environ.get("PARAPHRASE_SERVICE_URL", "http://paraphrase-service:8000")
+_GRAMMAR_BASE    = os.environ.get("GRAMMAR_SERVICE_URL",    "http://grammar-service:8000")
+_SIMPLIFY_BASE   = os.environ.get("SIMPLIFY_SERVICE_URL",   "http://simplify-service:8000")
+_TONE_BASE       = os.environ.get("TONE_SERVICE_URL",        "http://tone-service:8000")
+_SUMMARIZE_BASE  = os.environ.get("SUMMARIZE_SERVICE_URL",  "http://summarize-service:8000")
+_RAG_BASE        = os.environ.get("RAG_SERVICE_URL",         "http://rag-service:8000")
 
 logger = setup_logging("gateway")
 http_client = httpx.AsyncClient()
@@ -111,11 +120,40 @@ async def health_check():
     return {"status": "ok", "service": "gateway"}
 
 
+@app.get("/readiness")
+async def readiness_check():
+    """Check if all downstream services are reachable."""
+    services = {
+        "paraphrase": f"{_PARAPHRASE_BASE}/health",
+        "grammar":    f"{_GRAMMAR_BASE}/health",
+        "simplify":   f"{_SIMPLIFY_BASE}/health",
+        "tone":       f"{_TONE_BASE}/health",
+        "summarize":  f"{_SUMMARIZE_BASE}/health",
+        "rag":        f"{_RAG_BASE}/health",
+    }
+    results = {}
+    all_ok = True
+    for name, url in services.items():
+        try:
+            resp = await http_client.get(url, timeout=3.0)
+            results[name] = {"status": "ok", "code": resp.status_code}
+        except Exception as e:
+            results[name] = {"status": "error", "error": str(e)}
+            all_ok = False
+
+    status_code = 200 if all_ok else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content={"ready": all_ok, "services": results},
+        status_code=status_code,
+    )
+
+
 @app.post("/api/paraphrase", response_model=ParaphraseResponse)
 async def paraphrase(request: ParaphraseRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/paraphrase"):
-        result = await call_downstream("http://paraphrase-service:8000/process", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_PARAPHRASE_BASE}/process", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/paraphrase", status_code=200).inc()
     return result
 
@@ -124,7 +162,7 @@ async def paraphrase(request: ParaphraseRequest, req: Request, user_id: str = De
 async def grammar(request: GrammarRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/grammar"):
-        result = await call_downstream("http://grammar-service:8000/process", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_GRAMMAR_BASE}/process", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/grammar", status_code=200).inc()
     return result
 
@@ -133,7 +171,7 @@ async def grammar(request: GrammarRequest, req: Request, user_id: str = Depends(
 async def simplify(request: SimplifyRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/simplify"):
-        result = await call_downstream("http://simplify-service:8000/process", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_SIMPLIFY_BASE}/process", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/simplify", status_code=200).inc()
     return result
 
@@ -142,7 +180,7 @@ async def simplify(request: SimplifyRequest, req: Request, user_id: str = Depend
 async def tone(request: ToneRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/tone"):
-        result = await call_downstream("http://tone-service:8000/process", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_TONE_BASE}/process", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/tone", status_code=200).inc()
     return result
 
@@ -151,7 +189,7 @@ async def tone(request: ToneRequest, req: Request, user_id: str = Depends(verify
 async def summarize(request: SummarizeRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/summarize"):
-        result = await call_downstream("http://summarize-service:8000/process", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_SUMMARIZE_BASE}/process", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/summarize", status_code=200).inc()
     return result
 
@@ -160,7 +198,7 @@ async def summarize(request: SummarizeRequest, req: Request, user_id: str = Depe
 async def rag_query(request: RAGQueryRequest, req: Request, user_id: str = Depends(verify_token)):
     req.state.user_id = user_id
     with LatencyTracker("gateway", "/api/rag/query"):
-        result = await call_downstream("http://rag-service:8000/query", request.dict(), req.state.trace_id)
+        result = await call_downstream(f"{_RAG_BASE}/query", request.dict(), req.state.trace_id)
     REQUEST_COUNT.labels(service="gateway", endpoint="/api/rag/query", status_code=200).inc()
     return result
 
@@ -172,7 +210,7 @@ async def rag_ingest(req: Request, file: UploadFile = File(...), user_id: str = 
     files = {"file": (file.filename, await file.read(), file.content_type)}
     try:
         resp = await http_client.post(
-            "http://rag-service:8000/ingest",
+            f"{_RAG_BASE}/ingest",
             files=files,
             headers={"X-Trace-Id": trace_id},
             timeout=60.0,
@@ -192,7 +230,7 @@ async def rag_ingest(req: Request, file: UploadFile = File(...), user_id: str = 
 async def rag_ingest_status(task_id: str, req: Request, user_id: str = Depends(verify_token)):
     try:
         resp = await http_client.get(
-            f"http://rag-service:8000/ingest/status/{task_id}",
+            f"{_RAG_BASE}/ingest/status/{task_id}",
             headers={"X-Trace-Id": req.state.trace_id},
             timeout=10.0,
         )

@@ -1,1 +1,0 @@
-# Summarize service app package

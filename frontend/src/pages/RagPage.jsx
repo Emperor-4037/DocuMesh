@@ -3,6 +3,7 @@ import { Database, Upload, SendHorizonal, FileText, CheckCircle2, X } from 'luci
 import { ragIngest, ragQuery } from '../api';
 import { useToast } from '../context/ToastContext';
 import { Spinner, FormGroup } from '../components/ui';
+import PageWrapper from '../components/PageWrapper';
 
 export default function RagPage() {
   // Upload state

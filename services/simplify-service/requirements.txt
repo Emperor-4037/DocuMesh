@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-python-json-logger
-torch
-transformers
-accelerate
-peft
-prometheus-fastapi-instrumentator

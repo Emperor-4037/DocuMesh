@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+# Install system utilities needed by sub-packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch binaries with CUDA support for GPU inference
+RUN pip install --no-cache-dir torch torchvision
+
+# Pre-install foundational GenAI libraries
+RUN pip install --no-cache-dir transformers accelerate peft sentence-transformers

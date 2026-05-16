@@ -1,409 +1,368 @@
-#!/usr/bin/env python3
 """
-Fine-tune all NLP services with LoRA/QLoRA adapters.
-
-Strategy (to stay under 3 hours total on a single consumer GPU):
-  - Use LoRA (r=8) adapters on T5/BART encoder-decoder models
-  - Short training: 3 epochs on small high-quality dataset subsets
-  - 4-bit quantization (QLoRA) if CUDA + bitsandbytes available
-  - Save adapters to ./models/{service_name}/ for deployment
-
-Models + Datasets:
-  paraphrase  : humarin/chatgpt_paraphraser_on_T5_base  |  paws (PAWS-X paraphrase pairs)
-  grammar     : vennify/t5-base-grammar-correction        |  jfleg (grammatical error correction)
-  simplify    : google/flan-t5-base                       |  wiki_simple (Wikipedia/Simple Wikipedia aligned)
-  tone        : google/flan-t5-base                       |  synthetic tone prompt-completion pairs (generated)
-  summarize   : facebook/bart-large-cnn                   |  cnn_dailymail (already near-optimal, short finetune)
+Unified QLoRA fine-tuning pipeline for all AI Writing Assistant services.
 
 Usage:
-  python scripts/finetune.py --service all           # Fine-tune all services
-  python scripts/finetune.py --service paraphrase    # Fine-tune one
-  python scripts/finetune.py --service all --dry-run # Preview config
-"""
+  python scripts/finetune.py --task paraphrase --epochs 3 --output models/adapters/paraphrase/v2
+  python scripts/finetune.py --task all --dry-run
 
+Design:
+  - QLoRA (4-bit base + LoRA adapters) for maximum GPU efficiency
+  - Per-architecture precision control: bf16 preferred, fp32 fallback for T5 (never fp16 on T5)
+  - Gradient clipping + warmup + NaN detection for training stability
+  - Conservative learning rates per backbone family
+  - Produces adapter-only outputs (~10-50MB each)
+  - Adapter versioned by output directory name
+  - Rollback = point config at previous adapter directory
+
+Changes from v1:
+  - Fixed: T5 NaN loss by disabling fp16 for T5 architectures
+  - Fixed: Simplify dataset loader via data_preprocessing module
+  - Fixed: Grammar now uses both jfleg splits + expanded data
+  - Fixed: Tone expanded from 9 templates to ~70 unique templates
+  - Added: Gradient clipping (max_grad_norm=1.0)
+  - Added: NaN loss detection with early stopping
+  - Added: Per-run metadata.json for versioning
+  - Added: Warmup ratio instead of fixed warmup steps
+  - Added: Expanded LoRA target modules for better capacity
+"""
 import argparse
+import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from transformers import TrainerCallback
 
-import torch
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# ── Task Configurations ──────────────────────────────────────────────────────
+# Key design decisions documented inline.
 
-MODELS_DIR = Path(__file__).parent.parent / "models"
-MODELS_DIR.mkdir(exist_ok=True)
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-USE_QLORA = DEVICE == "cuda"
-
-# Time budget per service (total 3h = 180 min -> ~30 min each for 5 services)
-TIME_BUDGET_MINUTES = 30
-
-SERVICE_CONFIGS = {
+TASKS = {
     "paraphrase": {
         "base_model": "humarin/chatgpt_paraphraser_on_T5_base",
-        "dataset_name": "paws",
-        "dataset_config": "labeled_final",
-        "input_col": "sentence1",
-        "target_col": "sentence2",
-        "input_prefix": "paraphrase: ",
+        "arch": "t5",          # Architecture family, controls precision logic
         "max_input_len": 128,
         "max_target_len": 128,
-        "num_train_samples": 5000,
-        "num_epochs": 3,
         "batch_size": 16,
-        "lr": 2e-4,
+        "lr": 5e-5,            # Lowered from 2e-4 to prevent gradient explosion on T5
+        "epochs": 3,
+        # T5 names attention layers as "q", "k", "v", "o"
+        "target_modules": ["q", "k", "v", "o"],
     },
     "grammar": {
         "base_model": "vennify/t5-base-grammar-correction",
-        "dataset_name": "jfleg",
-        "dataset_config": None,
-        "input_col": "sentence",
-        "target_col": "corrections",  # list — handled specially
-        "input_prefix": "grammar: ",
+        "arch": "t5",
         "max_input_len": 128,
         "max_target_len": 128,
-        "num_train_samples": 4000,
-        "num_epochs": 3,
         "batch_size": 16,
-        "lr": 2e-4,
+        "lr": 5e-5,            # Conservative for small dataset
+        "epochs": 5,           # More epochs to compensate for small dataset
+        "target_modules": ["q", "k", "v", "o"],
     },
     "simplify": {
         "base_model": "google/flan-t5-base",
-        "dataset_name": "wiki_lingua",
-        "dataset_config": "english",
-        "input_col": "source_paragraph",
-        "target_col": "target_paragraph",
-        "input_prefix": "Simplify the following text in plain English: ",
+        "arch": "t5",
         "max_input_len": 256,
         "max_target_len": 128,
-        "num_train_samples": 5000,
-        "num_epochs": 3,
         "batch_size": 8,
-        "lr": 2e-4,
+        "lr": 5e-5,
+        "epochs": 3,
+        "target_modules": ["q", "k", "v", "o"],
     },
     "tone": {
         "base_model": "google/flan-t5-base",
-        "dataset_name": "synthetic",  # generated inline
-        "dataset_config": None,
-        "input_col": "input",
-        "target_col": "output",
-        "input_prefix": "",  # prefix built into input
+        "arch": "t5",
         "max_input_len": 256,
         "max_target_len": 128,
-        "num_train_samples": 3000,
-        "num_epochs": 4,
         "batch_size": 8,
-        "lr": 2e-4,
+        "lr": 3e-5,            # Extra-conservative: synthetic data + T5 = high risk
+        "epochs": 4,
+        "target_modules": ["q", "k", "v", "o"],
     },
     "summarize": {
         "base_model": "facebook/bart-large-cnn",
-        "dataset_name": "cnn_dailymail",
-        "dataset_config": "3.0.0",
-        "input_col": "article",
-        "target_col": "highlights",
-        "input_prefix": "",
+        "arch": "bart",        # BART uses different attention layer names
         "max_input_len": 512,
         "max_target_len": 128,
-        "num_train_samples": 3000,
-        "num_epochs": 2,
         "batch_size": 4,
-        "lr": 1e-4,
+        "lr": 1e-4,            # BART is more stable with fp16; can use higher LR
+        "epochs": 2,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "out_proj"],
     },
 }
 
-# ── LoRA Configuration ─────────────────────────────────────────────────────────
 
-LORA_CONFIG = {
-    "r": 8,
-    "lora_alpha": 32,
-    "lora_dropout": 0.1,
-    "bias": "none",
-    "task_type": "SEQ_2_SEQ_LM",
-    "target_modules": ["q", "v"],  # T5/BART attention projections
-}
+def get_precision_config(arch: str, device: str) -> dict:
+    """
+    Return precision settings appropriate for the architecture.
 
+    WHY: T5 models produce NaN loss under fp16 due to activation overflow in
+    the relative position bias computation. bf16 is safe; fp32 is the fallback.
+    BART models are stable under fp16.
+    """
+    import torch
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+    if device != "cuda":
+        return {"fp16": False, "bf16": False, "compute_dtype": torch.float32}
 
-def check_dependencies():
-    missing = []
-    for pkg in ["transformers", "datasets", "peft", "accelerate"]:
-        try:
-            __import__(pkg)
-        except ImportError:
-            missing.append(pkg)
-    if USE_QLORA:
-        try:
-            import bitsandbytes  # noqa
-        except ImportError:
-            missing.append("bitsandbytes")
-    if missing:
-        print(f"❌ Missing packages: {', '.join(missing)}")
-        print(f"   Install with: pip install {' '.join(missing)}")
-        sys.exit(1)
+    has_bf16 = torch.cuda.is_bf16_supported()
+
+    if arch == "t5":
+        # T5 MUST NOT use fp16. Use bf16 if available, else fp32.
+        if has_bf16:
+            return {"fp16": False, "bf16": True, "compute_dtype": torch.bfloat16}
+        else:
+            return {"fp16": False, "bf16": False, "compute_dtype": torch.float32}
+    else:
+        # BART and other architectures: bf16 preferred, fp16 acceptable
+        if has_bf16:
+            return {"fp16": False, "bf16": True, "compute_dtype": torch.bfloat16}
+        else:
+            return {"fp16": True, "bf16": False, "compute_dtype": torch.float16}
 
 
-def build_bnb_config():
-    if not USE_QLORA:
-        return None
-    from transformers import BitsAndBytesConfig
-    return BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-
-
-def generate_tone_dataset(n: int = 3000):
-    """Generate synthetic tone transfer pairs (formal <-> informal)."""
-    from datasets import Dataset
-    import random
-
-    templates = {
-        "formal": [
-            ("hey, can you help me out?", "Could you please assist me with this matter?"),
-            ("I wanna know what's up with the report", "I would like to inquire about the status of the report."),
-            ("this is super important!!!", "This matter is of considerable importance."),
-            ("let me know asap", "Please inform me at your earliest convenience."),
-            ("the meeting's been pushed", "The meeting has been rescheduled."),
-            ("thanks a bunch!", "I sincerely appreciate your assistance."),
-            ("gotta fix this bug today", "It is necessary to resolve this issue today."),
-            ("the deadline got moved up", "The deadline has been advanced."),
-        ],
-        "informal": [
-            ("I would like to formally request your assistance.", "Hey, can you help me out?"),
-            ("Please be advised that the meeting is rescheduled.", "FYI, the meeting's been moved."),
-            ("Your cooperation in this matter is greatly appreciated.", "Really appreciate you helping!"),
-        ],
+def save_run_metadata(output_dir: Path, task_name: str, cfg: dict,
+                      precision: dict, train_result, dataset_sizes: dict):
+    """
+    Save a metadata.json alongside the adapter for versioning and rollback.
+    This is the source of truth for what produced this adapter.
+    """
+    metadata = {
+        "task": task_name,
+        "base_model": cfg["base_model"],
+        "architecture": cfg["arch"],
+        "training_config": {
+            "learning_rate": cfg["lr"],
+            "epochs": cfg["epochs"],
+            "batch_size": cfg["batch_size"],
+            "max_input_len": cfg["max_input_len"],
+            "max_target_len": cfg["max_target_len"],
+            "target_modules": cfg["target_modules"],
+            "lora_r": 8,
+            "lora_alpha": 32,
+            "gradient_clipping": 1.0,
+        },
+        "precision": {
+            "fp16": precision["fp16"],
+            "bf16": precision["bf16"],
+        },
+        "dataset": dataset_sizes,
+        "results": {
+            "train_loss": train_result.training_loss if train_result else None,
+            "train_runtime_sec": train_result.metrics.get("train_runtime") if train_result else None,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "pipeline_version": "2.0.0",
     }
-
-    data = {"input": [], "output": []}
-    tones = list(templates.keys())
-    for _ in range(n):
-        tone = random.choice(tones)
-        pair = random.choice(templates[tone])
-        prefix = f"Rewrite in {tone} tone: {pair[0]}"
-        data["input"].append(prefix)
-        data["output"].append(pair[1])
-
-    return Dataset.from_dict(data)
+    meta_path = output_dir / "metadata.json"
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2, default=str)
+    print(f"  Metadata saved to {meta_path}")
 
 
-def load_dataset_for_service(config: dict):
-    from datasets import load_dataset
+class NaNLossCallback(TrainerCallback):
 
-    name = config["dataset_name"]
-    cfg = config["dataset_config"]
-
-    if name == "synthetic":
-        return generate_tone_dataset(config["num_train_samples"])
-
-    if name == "jfleg":
-        ds = load_dataset("jfleg", split="validation")
-        # jfleg corrections is a list; take first correction
-        records = [
-            {"input": s, "output": c[0] if c else s}
-            for s, c in zip(ds["sentence"], ds["corrections"])
-            if c
-        ]
-        from datasets import Dataset
-        records = records[: config["num_train_samples"]]
-        flat = {"input": [r["input"] for r in records], "output": [r["output"] for r in records]}
-        return Dataset.from_dict(flat)
-
-    print(f"  Loading dataset '{name}' (config={cfg})...")
-    splits = load_dataset(name, cfg) if cfg else load_dataset(name)
-    train = splits["train"]
-    n = config["num_train_samples"]
-    if len(train) > n:
-        train = train.shuffle(seed=42).select(range(n))
-
-    # Normalize to input/output columns
-    in_col = config["input_col"]
-    out_col = config["target_col"]
-
-    if in_col not in train.column_names:
-        # Handle nested columns
-        sample = train[0]
-        print(f"  Available columns: {list(sample.keys())}")
-        raise ValueError(f"Column '{in_col}' not found in dataset.")
-
-    prefix = config["input_prefix"]
-    if name == "cnn_dailymail":
-        return train.map(
-            lambda x: {"input": x[in_col][:1024], "output": x[out_col]},
-            remove_columns=train.column_names,
-        )
-
-    return train.map(
-        lambda x: {"input": prefix + str(x[in_col])[:512], "output": str(x[out_col])[:256]},
-        remove_columns=train.column_names,
-    )
+    """
+    Halt training immediately if NaN loss is detected.
+    WHY: Continuing training after NaN corrupts all subsequent gradients
+    and produces a useless adapter. Fail fast, fix the cause.
+    """
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        import math
+        if logs and "loss" in logs:
+            loss_val = logs["loss"]
+            if isinstance(loss_val, (int, float)) and (math.isnan(loss_val) or math.isinf(loss_val)):
+                print(f"\n  ⚠️  NaN/Inf loss detected at step {state.global_step}. Halting training.")
+                control.should_training_stop = True
 
 
-def finetune_service(service_name: str, dry_run: bool = False):
+def train_task(task_name: str, output_dir: str, dry_run: bool = False, max_samples: int = 5000):
+    """Run QLoRA fine-tuning for a single task with all stability fixes."""
+    import torch
     from transformers import (
         AutoTokenizer, AutoModelForSeq2SeqLM,
         Seq2SeqTrainingArguments, Seq2SeqTrainer,
-        DataCollatorForSeq2Seq,
+        DataCollatorForSeq2Seq, BitsAndBytesConfig,
     )
     from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 
-    config = SERVICE_CONFIGS[service_name]
-    output_dir = MODELS_DIR / service_name
-    output_dir.mkdir(exist_ok=True)
+    # Import our preprocessing module (lives in same directory)
+    sys.path.insert(0, str(Path(__file__).parent))
+    from data_preprocessing import load_and_preprocess
+
+    cfg = TASKS[task_name]
+    if not torch.cuda.is_available():
+        raise RuntimeError("GPU is required but not available.")
+    device = "cuda"
+
+    precision = get_precision_config(cfg["arch"], device)
 
     print(f"\n{'='*60}")
-    print(f"  Fine-tuning: {service_name}")
-    print(f"  Base model : {config['base_model']}")
-    print(f"  Device     : {DEVICE} ({'QLoRA 4-bit' if USE_QLORA else 'float32'})")
-    print(f"  Epochs     : {config['num_epochs']} | Batch: {config['batch_size']} | LR: {config['lr']}")
+    print(f"  Task       : {task_name}")
+    print(f"  Model      : {cfg['base_model']}")
+    print(f"  Arch       : {cfg['arch']}")
+    print(f"  Device     : {device}")
+    print(f"  Precision  : fp16={precision['fp16']}, bf16={precision['bf16']}")
+    print(f"  LR         : {cfg['lr']}")
+    print(f"  LoRA targets: {cfg['target_modules']}")
+    print(f"  Output     : {output_dir}")
     print(f"{'='*60}")
 
     if dry_run:
-        print("  [DRY RUN] — skipping actual training")
+        print("  [DRY RUN] — skipping training")
         return
 
     start = time.time()
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
 
-    # ── Load tokenizer ───────────────────────────────────────────────────────
-    tokenizer = AutoTokenizer.from_pretrained(config["base_model"], legacy=False)
+    # ── Load model + tokenizer ────────────────────────────────────────────
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=precision["compute_dtype"],
+    )
 
-    # ── Load model with optional 4-bit quantization ──────────────────────────
-    bnb = build_bnb_config()
-    if bnb:
-        model = AutoModelForSeq2SeqLM.from_pretrained(
-            config["base_model"],
-            quantization_config=bnb,
-            device_map="auto",
-        )
-        model = prepare_model_for_kbit_training(model)
-    else:
-        model = AutoModelForSeq2SeqLM.from_pretrained(config["base_model"]).to(DEVICE)
+    tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"], legacy=False)
 
-    # ── Attach LoRA adapters ─────────────────────────────────────────────────
-    # Determine target modules based on model architecture
-    if "bart" in config["base_model"].lower():
-        targets = ["q_proj", "v_proj"]
-    else:
-        targets = ["q", "v"]
+    model = AutoModelForSeq2SeqLM.from_pretrained(
+        cfg["base_model"],
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=precision["compute_dtype"],
+        trust_remote_code=True,
+    )
 
-    lora_cfg = LoraConfig(
+    model = prepare_model_for_kbit_training(model)
+
+    # ── Attach LoRA adapters ──────────────────────────────────────────────
+    # Expanded target modules (q,k,v,o) for better capacity vs (q,v) only
+    lora = LoraConfig(
         r=8,
         lora_alpha=32,
-        target_modules=targets,
+        target_modules=cfg["target_modules"],
         lora_dropout=0.1,
         bias="none",
         task_type=TaskType.SEQ_2_SEQ_LM,
     )
-    model = get_peft_model(model, lora_cfg)
+    model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    # ── Load and tokenize dataset ────────────────────────────────────────────
-    print(f"  Loading dataset...")
-    dataset = load_dataset_for_service(config)
+    # ── Load + tokenize data ──────────────────────────────────────────────
+    # Uses the preprocessing module for clean, deduplicated, validated data
+    splits = load_and_preprocess(task_name, max_samples=max_samples)
+    dataset_sizes = {
+        "train": len(splits["train"]),
+        "val": len(splits["val"]),
+        "test": len(splits["test"]),
+    }
+    print(f"  Dataset: train={dataset_sizes['train']}, val={dataset_sizes['val']}, test={dataset_sizes['test']}")
 
-    max_in = config["max_input_len"]
-    max_out = config["max_target_len"]
+    max_in, max_out = cfg["max_input_len"], cfg["max_target_len"]
 
     def tokenize(batch):
-        model_inputs = tokenizer(batch["input"], max_length=max_in, truncation=True, padding="max_length")
+        inputs = tokenizer(batch["input"], max_length=max_in, truncation=True, padding="max_length")
         labels = tokenizer(text_target=batch["output"], max_length=max_out, truncation=True, padding="max_length")
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
+        inputs["labels"] = labels["input_ids"]
+        return inputs
 
-    print("  Tokenizing...")
-    tokenized = dataset.map(tokenize, batched=True, remove_columns=dataset.column_names)
+    train_ds = splits["train"].map(tokenize, batched=True, remove_columns=["input", "output"])
+    val_ds = splits["val"].map(tokenize, batched=True, remove_columns=["input", "output"])
 
-    # 10% validation split
-    split = tokenized.train_test_split(test_size=0.1, seed=42)
-    train_ds, eval_ds = split["train"], split["test"]
-
-    # ── Training arguments ───────────────────────────────────────────────────
-    # Derive max steps from time budget
-    steps_per_epoch = len(train_ds) // config["batch_size"]
-    max_steps = min(
-        steps_per_epoch * config["num_epochs"],
-        (TIME_BUDGET_MINUTES * 60) // 4,  # rough: 4s/step
-    )
-
-    training_args = Seq2SeqTrainingArguments(
-        output_dir=str(output_dir),
-        num_train_epochs=config["num_epochs"],
-        max_steps=max_steps,
-        per_device_train_batch_size=config["batch_size"],
-        per_device_eval_batch_size=config["batch_size"],
+    # ── Training arguments ────────────────────────────────────────────────
+    args = Seq2SeqTrainingArguments(
+        output_dir=str(out),
+        num_train_epochs=cfg["epochs"],
+        per_device_train_batch_size=cfg["batch_size"],
+        per_device_eval_batch_size=cfg["batch_size"],
         gradient_accumulation_steps=2,
-        learning_rate=config["lr"],
-        fp16=USE_QLORA,
-        bf16=False,
-        predict_with_generate=True,
-        evaluation_strategy="steps",
-        eval_steps=max(50, max_steps // 10),
-        save_strategy="steps",
-        save_steps=max(100, max_steps // 5),
+        learning_rate=cfg["lr"],
+        # Precision: architecture-aware (never fp16 for T5)
+        fp16=precision["fp16"],
+        bf16=precision["bf16"],
+        # Stability: gradient clipping prevents explosion
+        max_grad_norm=1.0,
+        # Warmup: ratio-based adapts to dataset size automatically
+        warmup_ratio=0.1,
+        # Evaluation and checkpointing
+        eval_strategy="epoch",
+        save_strategy="epoch",
         load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        # Logging
         logging_steps=20,
-        warmup_steps=min(100, max_steps // 10),
         report_to="none",
-        dataloader_num_workers=2,
+        # Reproducibility
+        seed=42,
+        data_seed=42,
     )
 
-    collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True)
+    # ── Train ─────────────────────────────────────────────────────────────
     trainer = Seq2SeqTrainer(
         model=model,
-        args=training_args,
+        args=args,
         train_dataset=train_ds,
-        eval_dataset=eval_ds,
-        tokenizer=tokenizer,
-        data_collator=collator,
+        eval_dataset=val_ds,
+        processing_class=tokenizer,
+        data_collator=DataCollatorForSeq2Seq(tokenizer, model=model),
+        callbacks=[NaNLossCallback()],
     )
 
-    print(f"  Training for up to {max_steps} steps...")
-    trainer.train()
+    train_result = trainer.train()
 
-    # ── Save LoRA adapter only (small, ~10-50MB vs full model) ───────────────
-    model.save_pretrained(str(output_dir))
-    tokenizer.save_pretrained(str(output_dir))
+    # ── Save adapter + metadata ───────────────────────────────────────────
+    model.save_pretrained(str(out))
+    tokenizer.save_pretrained(str(out))
+    save_run_metadata(out, task_name, cfg, precision, train_result, dataset_sizes)
 
     elapsed = (time.time() - start) / 60
-    print(f"\n  ✅ {service_name} done in {elapsed:.1f} min → saved to {output_dir}")
+    final_loss = train_result.training_loss
+    print(f"\n  [OK] {task_name} done in {elapsed:.1f} min -> {out}")
+    print(f"       Final train loss: {final_loss:.4f}")
 
-
-# ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Fine-tune AI platform NLP services with LoRA/QLoRA")
-    parser.add_argument(
-        "--service",
-        choices=list(SERVICE_CONFIGS.keys()) + ["all"],
-        default="all",
-        help="Which service to fine-tune (default: all)",
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Print config without training")
+    parser = argparse.ArgumentParser(description="QLoRA fine-tuning for AI Writing Assistant v2")
+    parser.add_argument("--task", choices=list(TASKS.keys()) + ["all"], default="all")
+    parser.add_argument("--output", default="models/adapters")
+    parser.add_argument("--version", default="v2", help="Version tag for output directory")
+    parser.add_argument("--epochs", type=int, default=None, help="Override epochs")
+    parser.add_argument("--lr", type=float, default=None, help="Override learning rate")
+    parser.add_argument("--max-samples", type=int, default=5000)
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    check_dependencies()
+    tasks = list(TASKS.keys()) if args.task == "all" else [args.task]
 
     total_start = time.time()
-    services = list(SERVICE_CONFIGS.keys()) if args.service == "all" else [args.service]
+    results = {}
 
-    print(f"\n🚀 AI Platform Fine-tuning")
-    print(f"   GPU    : {DEVICE.upper()}" + (f" ({torch.cuda.get_device_name(0)})" if DEVICE == "cuda" else ""))
-    print(f"   Mode   : {'QLoRA 4-bit' if USE_QLORA else 'LoRA FP32'}")
-    print(f"   Budget : {TIME_BUDGET_MINUTES} min/service")
-    print(f"   Output : {MODELS_DIR}")
+    for task in tasks:
+        if args.epochs:
+            TASKS[task]["epochs"] = args.epochs
+        if args.lr:
+            TASKS[task]["lr"] = args.lr
 
-    for svc in services:
-        finetune_service(svc, dry_run=args.dry_run)
+        out_dir = f"{args.output}/{task}/{args.version}"
+        try:
+            train_task(task, out_dir, dry_run=args.dry_run, max_samples=args.max_samples)
+            results[task] = "OK"
+        except Exception as e:
+            print(f"  [ERROR] Task {task} failed: {e}")
+            import traceback
+            traceback.print_exc()
+            results[task] = f"FAILED: {e}"
 
-    total_elapsed = (time.time() - total_start) / 60
-    print(f"\n🎉 All services done in {total_elapsed:.1f} minutes total.")
-    print(f"   Adapters saved to: {MODELS_DIR}")
-    print(f"   Each service now loads from its adapter directory automatically.")
+    total_min = (time.time() - total_start) / 60
+    print(f"\n{'='*60}")
+    print("  Training Summary")
+    print(f"{'='*60}")
+    for task, status in results.items():
+        print(f"  {task:15s} : {status}")
+    print(f"\n  Total time: {total_min:.1f} minutes")
 
 
 if __name__ == "__main__":

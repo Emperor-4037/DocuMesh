@@ -81,8 +81,8 @@ export default function GrammarPage() {
                   {result.corrections.map((c, i) => (
                     <div key={i} className="card-glass" style={{ padding: '10px 14px' }}>
                       <span style={{ color: 'var(--clr-error)', textDecoration: 'line-through', marginRight: 8 }}>{c.original}</span>
-                      <span style={{ color: 'var(--clr-success)' }}>→ {c.corrected}</span>
-                      {c.message && <div className="text-xs text-muted mt-2">{c.message}</div>}
+                      <span style={{ color: 'var(--clr-success)' }}>→ {c.replacement}</span>
+                      {c.description && <div className="text-xs text-muted mt-2">{c.description}</div>}
                     </div>
                   ))}
                 </div>

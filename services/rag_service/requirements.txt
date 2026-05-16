@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+python-json-logger
+qdrant-client
+celery[redis]
+redis
+sqlalchemy[asyncio]
+asyncpg
+prometheus-fastapi-instrumentator
+python-multipart
+pymupdf

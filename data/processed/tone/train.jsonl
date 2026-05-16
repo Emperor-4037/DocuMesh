@@ -1,0 +1,60 @@
+{"input": "Rewrite in formal tone: i'm swamped right now", "output": "I am currently managing a heavy workload."}
+{"input": "Rewrite in casual tone: The system requires maintenance.", "output": "The system needs some fixing up."}
+{"input": "Rewrite in formal tone: thanks a bunch", "output": "Thank you very much for your assistance."}
+{"input": "Rewrite in casual tone: I recommend we proceed with caution.", "output": "Let's be careful here."}
+{"input": "Rewrite in professional tone: someone messed up the deploy", "output": "An issue was encountered during deployment."}
+{"input": "Rewrite in formal tone: my bad, i messed up", "output": "I apologize for the error on my part."}
+{"input": "Rewrite in formal tone: i'll get back to you", "output": "I will follow up with you at a later time."}
+{"input": "Rewrite in formal tone: hey can you help me?", "output": "Could you please assist me with this matter?"}
+{"input": "Rewrite in informal tone: The deadline has been extended accordingly.", "output": "We've got more time now."}
+{"input": "Rewrite in professional tone: the client is mad", "output": "The client has expressed concerns."}
+{"input": "Rewrite in informal tone: The matter requires immediate attention.", "output": "We need to deal with this ASAP."}
+{"input": "Rewrite in professional tone: this thing is broken", "output": "The system is currently experiencing an issue."}
+{"input": "Rewrite in informal tone: I would be most grateful for your prompt response.", "output": "Get back to me when you can!"}
+{"input": "Rewrite in casual tone: The project is progressing well.", "output": "Project's looking good!"}
+{"input": "Rewrite in informal tone: Please do not hesitate to contact me.", "output": "Feel free to reach out anytime."}
+{"input": "Rewrite in professional tone: we're behind schedule", "output": "The project timeline requires adjustment."}
+{"input": "Rewrite in casual tone: I will review this document.", "output": "I'll take a look at this."}
+{"input": "Rewrite in formal tone: the thing is broken", "output": "The system is currently experiencing a malfunction."}
+{"input": "Rewrite in informal tone: I would like to formally request your assistance.", "output": "Hey, can you help me out?"}
+{"input": "Rewrite in formal tone: i totally agree with you", "output": "I am in complete agreement with your assessment."}
+{"input": "Rewrite in formal tone: that's not gonna fly", "output": "That approach is unlikely to meet approval."}
+{"input": "Rewrite in formal tone: we need to talk about this", "output": "We should discuss this matter at your convenience."}
+{"input": "Rewrite in formal tone: nope, that won't work", "output": "Unfortunately, that approach will not be feasible."}
+{"input": "Rewrite in informal tone: The aforementioned issue has been resolved.", "output": "Fixed it!"}
+{"input": "Rewrite in informal tone: Your feedback is invaluable to our process.", "output": "Love hearing your thoughts!"}
+{"input": "Rewrite in formal tone: heads up, there's an issue", "output": "I wish to bring to your attention a matter of concern."}
+{"input": "Rewrite in casual tone: The analysis reveals significant findings.", "output": "We found some interesting stuff."}
+{"input": "Rewrite in casual tone: The team performed exceptionally well.", "output": "The team killed it!"}
+{"input": "Rewrite in informal tone: Kindly submit the documentation at your earliest convenience.", "output": "Send the docs when you get a chance."}
+{"input": "Rewrite in informal tone: Please be advised that the meeting is rescheduled.", "output": "FYI, the meeting's been moved."}
+{"input": "Rewrite in informal tone: I shall endeavor to complete this promptly.", "output": "I'll get right on it."}
+{"input": "Rewrite in formal tone: fyi the deadline changed", "output": "Please be advised that the deadline has been revised."}
+{"input": "Rewrite in formal tone: no worries about it", "output": "Please do not concern yourself with the matter."}
+{"input": "Rewrite in casual tone: We have achieved our quarterly targets.", "output": "We hit our goals!"}
+{"input": "Rewrite in informal tone: Your cooperation is greatly appreciated.", "output": "Thanks so much for helping!"}
+{"input": "Rewrite in formal tone: keep me in the loop", "output": "Please ensure that I am kept informed of developments."}
+{"input": "Rewrite in formal tone: let me know asap", "output": "Please inform me at your earliest convenience."}
+{"input": "Rewrite in casual tone: Please provide your feedback.", "output": "Let me know what you think."}
+{"input": "Rewrite in formal tone: that idea is pretty cool", "output": "That is a commendable proposition."}
+{"input": "Rewrite in informal tone: Please accept my sincere apologies.", "output": "Sorry about that!"}
+{"input": "Rewrite in informal tone: I must respectfully disagree with your assessment.", "output": "I don't really agree with that."}
+{"input": "Rewrite in formal tone: this is super important!!!", "output": "This matter is of considerable importance."}
+{"input": "Rewrite in casual tone: The report has been completed.", "output": "Done with the report!"}
+{"input": "Rewrite in formal tone: i need this done now", "output": "I would appreciate if this could be completed promptly."}
+{"input": "Rewrite in professional tone: it works fine now", "output": "The system is now functioning as expected."}
+{"input": "Rewrite in formal tone: just checking in on this", "output": "I am following up on the status of this matter."}
+{"input": "Rewrite in informal tone: It would be advisable to reconsider this approach.", "output": "Maybe we should try something else."}
+{"input": "Rewrite in formal tone: let's wrap this up", "output": "I suggest we bring this to a conclusion."}
+{"input": "Rewrite in formal tone: that's awesome work!", "output": "That is an excellent piece of work."}
+{"input": "Rewrite in professional tone: nobody knows what happened", "output": "The root cause is currently under investigation."}
+{"input": "Rewrite in informal tone: The performance metrics indicate satisfactory progress.", "output": "Things are going well!"}
+{"input": "Rewrite in informal tone: I look forward to our continued collaboration.", "output": "Looking forward to working together!"}
+{"input": "Rewrite in formal tone: any updates on this?", "output": "Have there been any developments regarding this matter?"}
+{"input": "Rewrite in formal tone: sounds good to me", "output": "That proposal is acceptable."}
+{"input": "Rewrite in casual tone: The meeting has been concluded.", "output": "Meeting's over!"}
+{"input": "Rewrite in professional tone: the numbers don't add up", "output": "There appear to be discrepancies in the figures."}
+{"input": "Rewrite in formal tone: let's circle back on this", "output": "Let us revisit this topic at a later juncture."}
+{"input": "Rewrite in formal tone: gotta fix this today", "output": "It is necessary to resolve this issue today."}
+{"input": "Rewrite in informal tone: I regret to inform you of this development.", "output": "Bad news, unfortunately."}
+{"input": "Rewrite in formal tone: what's the deal with this?", "output": "Could you please clarify the situation regarding this?"}

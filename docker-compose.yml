@@ -1,6 +1,16 @@
 version: '3.8'
 
 services:
+  # ─── ML Base ───
+  ml-base:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.ml-base
+    image: writing-assistant-ml-base:latest
+    deploy:
+      mode: replicated
+      replicas: 0 # don't run an instance of this container
+
   # ─── Frontend ───
   frontend:
     build:
@@ -51,55 +61,132 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: paraphrase-service }
+      args: { SERVICE_NAME: paraphrase_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/paraphrase-service/app:/app/app
+      - ./services/paraphrase_service/app:/app/app
       - ./shared:/app/shared
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   grammar-service:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: grammar-service }
+      args: { SERVICE_NAME: grammar_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/grammar-service/app:/app/app
+      - ./services/grammar_service/app:/app/app
       - ./shared:/app/shared
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   simplify-service:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: simplify-service }
+      args: { SERVICE_NAME: simplify_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/simplify-service/app:/app/app
+      - ./services/simplify_service/app:/app/app
       - ./shared:/app/shared
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   tone-service:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: tone-service }
+      args: { SERVICE_NAME: tone_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/tone-service/app:/app/app
+      - ./services/tone_service/app:/app/app
       - ./shared:/app/shared
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   summarize-service:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: summarize-service }
+      args: { SERVICE_NAME: summarize_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/summarize-service/app:/app/app
+      - ./services/summarize_service/app:/app/app
       - ./shared:/app/shared
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   # ─── RAG Service + Celery Worker ───
   rag-service:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: rag-service }
+      args: { SERVICE_NAME: rag_service }
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/rag-service/app:/app/app
+      - ./services/rag_service/app:/app/app
       - ./shared:/app/shared
     depends_on:
       qdrant:
@@ -113,10 +200,17 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.service
-      args: { SERVICE_NAME: rag-service }
+      args: { SERVICE_NAME: rag_service }
     command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "-Q", "rag-queue"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
-      - ./services/rag-service/app:/app/app
+      - ./services/rag_service/app:/app/app
       - ./shared:/app/shared
     depends_on:
       redis:

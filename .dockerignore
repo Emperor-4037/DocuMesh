@@ -1,0 +1,30 @@
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+
+# Environments
+venv/
+env/
+.venv/
+.env
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Test and coverage
+.coverage
+coverage.xml
+
+# JS
+node_modules/
+dist/
+
+# Application Specific
+models/
+*.log
+running.txt
